@@ -9,15 +9,17 @@ import (
 	"github.com/korylprince/drive-archive/drive"
 )
 
-func run(auth, user, out string) error {
+func run(auth, user, root, out string, downloadOrphans bool) error {
 	svc, err := drive.NewService(auth, user, time.Second, 8)
 	if err != nil {
 		return fmt.Errorf("could not create service: %w", err)
 	}
 
-	rootID, err := svc.Root()
-	if err != nil {
-		return fmt.Errorf("could not get root id: %w", err)
+	if root == "" {
+		root, err = svc.Root()
+		if err != nil {
+			return fmt.Errorf("could not get root id: %w", err)
+		}
 	}
 
 	files, err := svc.List()
@@ -27,14 +29,16 @@ func run(auth, user, out string) error {
 
 	fmt.Println("found", len(files), "total files")
 
-	root, orphans := drive.NewTree(rootID, files)
+	rootTree, orphans := drive.NewTree(root, files)
 
-	if err = svc.DownloadTree(root, out, 0); err != nil {
+	if err = svc.DownloadTree(rootTree, out, 0); err != nil {
 		return fmt.Errorf("could not finish downloading \"My Drive\" files: %w", err)
 	}
 
-	if err = svc.DownloadTree(orphans, out, 0); err != nil {
-		return fmt.Errorf("could not finish downloading Shared files: %w", err)
+	if downloadOrphans {
+		if err = svc.DownloadTree(orphans, out, 0); err != nil {
+			return fmt.Errorf("could not finish downloading Shared files: %w", err)
+		}
 	}
 
 	fmt.Println("done!")
@@ -45,6 +49,8 @@ func run(auth, user, out string) error {
 func main() {
 	flAuthJSON := flag.String("authfile", "", "path to service account json file")
 	flUser := flag.String("user", "", "email of user to download Google Drive files for")
+	flRoot := flag.String("root", "", "the id of the folder to download. Leave empty to download entire Drive")
+	flOrphans := flag.Bool("orphans", false, "download orphaned files. These are usually Shared Files")
 	flOut := flag.String("out", "", "path to output files to. Will be created if it doesn't already exist")
 	flHelp := flag.Bool("help", false, "display this help information")
 
@@ -73,12 +79,18 @@ func main() {
 		os.Exit(-1)
 	}
 
+	if *flRoot != "" && *flOrphans {
+		flag.Usage()
+		fmt.Println("\n-orphans cannot be used when -root is set")
+		os.Exit(-1)
+	}
+
 	if err := os.MkdirAll(*flOut, 0755); err != nil {
 		fmt.Println("could not create output directory:", err)
 		os.Exit(-1)
 	}
 
-	err := run(*flAuthJSON, *flUser, *flOut)
+	err := run(*flAuthJSON, *flUser, *flRoot, *flOut, *flOrphans)
 	if err != nil {
 		fmt.Println("could not download files:", err)
 		os.Exit(-1)
